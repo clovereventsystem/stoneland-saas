@@ -278,6 +278,7 @@
                 </div>
             </div>
 
+            <!-- 评委打分台 -->
             <div v-if="view === 'judge'">
                 <button v-if="role === 'admin'" @click="view = 'home'" class="mb-4 bg-slate-800 text-yellow-400 font-bold px-4 py-2 rounded-xl border border-slate-700 shadow text-sm btn-press">🏠 返回主目录</button>
                 <div v-if="!judgeId" class="text-center mt-6 max-w-md mx-auto">
@@ -290,7 +291,17 @@
                     <div class="bg-yellow-500 text-slate-900 p-3 rounded-xl font-black flex items-center justify-between mb-4 shadow-md px-4"><div class="flex items-center"><img v-if="getMe() && getMe().photo" :src="getMe().photo" class="w-8 h-8 rounded-full object-cover mr-2"><span>评审：{{ getMe() ? getMe().name : '' }}</span></div><button @click="resetAllScoresForCurrentJudge" class="bg-red-600 text-white text-xs px-2.5 py-1.5 rounded-lg font-bold btn-press shadow">⚠️ 清空打分</button></div>
                     <div v-if="!scoringId" class="space-y-3">
                         <div v-for="c in orderedActiveContestants" :key="c.id" class="bg-slate-800 p-4 rounded-xl flex items-center justify-between border border-slate-700">
-                            <div class="flex items-center flex-grow cursor-pointer" @click="startScoring(c.id)"><span class="bg-yellow-500 text-slate-950 font-black text-xs px-2 py-1 rounded mr-3">No.{{ c.no }}</span><img v-if="c.photo" :src="c.photo" class="w-12 h-12 rounded-full object-cover mr-3"><div><div class="font-bold text-lg">{{ c.name }}</div></div></div>
+                            <div class="flex items-center flex-grow cursor-pointer" @click="startScoring(c.id)">
+                                <span class="bg-yellow-500 text-slate-950 font-black text-xs px-2 py-1 rounded mr-3">No.{{ c.no }}</span>
+                                <img v-if="c.photo" :src="c.photo" class="w-12 h-12 rounded-full object-cover mr-3">
+                                <div>
+                                    <div class="font-bold text-lg">{{ c.name }}</div>
+                                    <!-- 🌟 修复点1：动态显示当前回合的歌曲名字 -->
+                                    <div class="text-xs text-yellow-400/90 mt-0.5 font-bold">
+                                        🎵 曲目: {{ system.currentRound == 3 ? (c.song3 || '未填R3曲目') : (system.currentRound == 2 ? (c.song2 || '未填R2曲目') : (c.song1 || '未填R1曲目')) }}
+                                    </div>
+                                </div>
+                            </div>
                             <div class="text-right ml-2 flex flex-col items-end"><button v-if="isPro && system.enableDetails" @click.stop="detailsC = c" class="text-[11px] bg-blue-600 text-white font-bold px-2.5 py-1 rounded-lg mb-1 btn-press">📊 明细</button><div v-if="getMyScore(c) > 0" class="text-green-400 font-bold cursor-pointer text-sm" @click="startScoring(c.id)">{{ getMyScore(c) }} 分</div><div v-else class="text-slate-500 text-xs cursor-pointer" @click="startScoring(c.id)">未打分</div></div>
                         </div>
                     </div>
@@ -302,7 +313,7 @@
                             <div v-for="item in criteriaConfig" :key="item.id" class="mb-6 bg-slate-900/60 p-4 rounded-xl border border-slate-700"><div class="flex justify-between items-center mb-3"><div><span class="font-bold text-slate-200 block">{{ item.name }}</span><span class="text-xs text-slate-500">满分 {{ item.max }}</span></div><div class="flex items-center bg-slate-900 rounded-lg border border-slate-600 px-2"><input type="number" v-model.number="tempScores[item.id]" @change="validateScore(item.id, item.max)" :max="item.max" min="0" class="w-14 h-10 bg-transparent text-yellow-400 text-xl font-black text-center outline-none"></div></div><input type="range" v-model.number="tempScores[item.id]" min="0" :max="item.max" class="w-full h-2 bg-slate-800 rounded-lg appearance-none accent-yellow-500 mb-3"><div class="flex gap-2"><button @click="changeScore(item.id, -1, item.max)" class="flex-1 bg-slate-800 py-2 rounded-lg font-bold btn-press">- 1</button><button @click="changeScore(item.id, -5, item.max)" class="flex-1 bg-slate-800 py-2 rounded-lg font-bold btn-press">- 5</button><button @click="changeScore(item.id, 5, item.max)" class="flex-1 bg-slate-800 py-2 rounded-lg font-bold btn-press">+ 5</button><button @click="changeScore(item.id, 1, item.max)" class="flex-1 bg-slate-800 py-2 rounded-lg font-bold btn-press">+ 1</button></div></div>
                         </div>
                         <div v-else class="mb-6 bg-slate-900/60 p-5 rounded-xl border border-yellow-500/50">
-                            <div class="flex justify-between items-center mb-4"><div><span class="font-bold text-slate-200 block text-base">选手最终得总分</span></div><div class="flex items-center bg-slate-900 rounded-lg border border-yellow-500 px-3 py-1"><input type="number" v-model.number="directScore" @change="validateDirectScore" max="100" min="0" class="w-16 h-10 bg-transparent text-yellow-400 text-2xl font-black text-center outline-none"></div></div><input type="range" v-model.number="directScore" min="0" max="100" class="w-full h-3 bg-slate-800 rounded-lg appearance-none accent-yellow-500 mb-5"><div class="flex gap-2"><button @click="changeDirectScore(-1)" class="flex-1 bg-slate-800 py-3 rounded-lg font-bold btn-press">- 1</button><button @click="changeDirectScore(-5)" class="flex-1 bg-slate-800 py-3 rounded-lg font-bold btn-press">- 5</button><button @click="changeDirectScore(5)" class="flex-1 bg-slate-800 py-3 rounded-lg font-bold btn-press">+ 5</button><button @click="changeDirectScore(1)" class="flex-1 bg-slate-800 py-3 rounded-lg font-bold btn-press">+ 1</button></div>
+                            <div class="flex justify-between items-center mb-4"><div><span class="font-bold text-slate-200 block text-base">选手最终得总分</span></div><div class="flex items-center bg-slate-900 rounded-lg border border-yellow-500 px-3 py-1"><input type="number" v-model.number="directScore" @change="validateDirectScore" max="100" min="0" class="w-16 h-10 bg-transparent text-yellow-400 text-2xl font-black text-center outline-none"></div></div><input type="range" v-model.number="directScore" min="0" max="100" class="w-full h-3 bg-slate-800 rounded-lg appearance-none accent-yellow-500 mb-5"><div class="flex gap-2"><button @click="changeDirectScore(-1)" class="flex-1 bg-slate-800 py-3 rounded-lg font-bold btn-press">- 1</button><button @click="changeDirectScore(-5)" class="flex-1 bg-slate-800 py-3 rounded-lg font-bold btn-press">- 5</button><button @click="changeDirectScore(5)" class="flex-1 bg-slate-800 py-3 rounded-lg font-bold btn-press">+ 5</button><button @click="changeDirectScore(1)" class="flex-1 bg-slate-800 py-3 rounded-lg font-bold btn-press">+ 1</button></div></div>
                         </div>
                         <button @click="submitScore" class="w-full bg-yellow-500 text-slate-900 text-xl font-black py-4 rounded-xl mt-4 btn-press">确认提交</button>
                         <button @click="scoringId = null" class="w-full text-slate-400 py-4 mt-2">← 取消</button>
@@ -370,7 +381,7 @@
                     selectedRevealId: '', showRevealModal: false, revealContestant: {}, revealedJudges: {}, rollingScores: {}, showFinalScoreBanner: false, animatedFinalScore: 0, allRevealed: false,
                     pollTimer: null, isFetching: false, loading: false,
                     portalStep: 0, inputEventId: '', isChecking: false, setupData: { admin: '', judge: '' },
-                    hasLoadedNames: false // 修复打字被打断的关键变量
+                    hasLoadedNames: false
                 }
             },
             computed: {
@@ -404,17 +415,10 @@
                 async checkEventId() { if (!this.inputEventId) return alert('请输入赛事编号'); this.isChecking = true; try { const res = await this.apiCall('/api/check-event', 'POST', { eventId: this.inputEventId }); if (!res.exists) { alert('⚠️ 赛事编号不存在，请联系客服。'); } else if (!res.isSetup) { this.portalStep = 2; } else { this.portalStep = 1; } } catch(e) { alert('验证失败'); } finally { this.isChecking = false; } },
                 async setupPasswords() { if (!this.setupData.admin || !this.setupData.judge) return alert('请填满两组密码'); this.isChecking = true; try { const res = await this.apiCall('/api/setup-event', 'POST', { eventId: this.inputEventId, adminPwd: this.setupData.admin, judgePwd: this.setupData.judge }); if (res.success) { alert('🎉 激活成功！可以直接登录'); this.portalStep = 1; } } catch(e) { alert('保存失败'); } finally { this.isChecking = false; } },
                 async checkLogin() { this.isChecking = true; try { const res = await this.apiCall('/api/login', 'POST', { eventId: this.inputEventId, password: this.inputPassword }); if (res.success) { this.role = res.role; this.view = this.role === 'admin' ? 'home' : this.role; this.isLoggedIn = true; localStorage.setItem('stoneRole', this.role); localStorage.setItem('stoneEventId', this.inputEventId); this.inputPassword = ''; this.fetchData(); this.startSmartPolling(); } else alert(res.message); } catch (e) { alert('登录失败'); } finally { this.isChecking = false; } },
-                
-                logout() { 
-                    this.isLoggedIn = false; this.portalStep = 0; this.inputEventId = ''; this.inputPassword = ''; 
-                    this.hasLoadedNames = false; // 清除读取状态
-                    localStorage.clear(); location.reload(); 
-                },
-                
+                logout() { this.isLoggedIn = false; this.portalStep = 0; this.inputEventId = ''; this.inputPassword = ''; this.hasLoadedNames = false; localStorage.clear(); location.reload(); },
                 startSmartPolling() { if (this.pollTimer) clearInterval(this.pollTimer); this.pollTimer = setInterval(() => { if (this.isLoggedIn && !this.scoringId && !this.isFetching) this.fetchData(); }, 2000); },
                 async updateSetting(dataObj) { await this.apiCall('/api/events/settings', 'POST', { eventId: this.eventId, data: dataObj }); this.fetchData(); },
                 async dbManage(table, action, dataObj) { await this.apiCall('/api/manage', 'POST', { table, action, eventId: this.eventId, data: dataObj }); this.fetchData(); },
-                
                 async fetchData() { 
                     if (!this.eventId && this.role !== 'boardOnly') return; 
                     try { 
@@ -428,19 +432,15 @@
                                 scoresData.filter(s => s.contestant_id === String(c.id)).forEach(s => { if (s.round == 1) c.r1Scores[s.judge_id] = s.score; if (s.round == 2) c.r2Scores[s.judge_id] = s.score; if (s.round == 3) c.r3Scores[s.judge_id] = s.score; }); 
                             }); 
                             this.system = sys; 
-                            
-                            // 🌟 修复打字被打断：只在首次进入后台时读取，之后打字时不再强行覆盖
                             if (!this.hasLoadedNames) {
                                 this.editEventName = sys.eventName; 
                                 this.editEventSubtitle = sys.eventSubtitle;
                                 this.hasLoadedNames = true;
                             }
-
                             if (this.role !== 'admin') this.applyRemoteRevealState(sys.revealState); 
                         } 
                     } catch(e) {} finally { this.isFetching = false; } 
                 },
-                
                 async changeFinalSeats(seats) { await this.updateSetting({final_seats: seats}); },
                 async toggleDetails() { await this.updateSetting({enable_details: !this.system.enableDetails}); },
                 async saveEventSettings() { await this.updateSetting({name: this.editEventName, subtitle: this.editEventSubtitle}); alert('保存成功'); },
@@ -504,7 +504,35 @@
                 handleContestantPhoto(e) { this.compressImg(e.target.files[0], d => this.newC.photo = d); }, handleJudgePhoto(e) { this.compressImg(e.target.files[0], d => this.newJ.photo = d); }, handleEditContestantPhoto(e) { this.compressImg(e.target.files[0], d => this.editingC.photo = d); }, handleEditJudgePhoto(e) { this.compressImg(e.target.files[0], d => this.editingJ.photo = d); },
                 openWheelModal() { this.showWheelModal = true; this.selectedWheelContestant = null; this.$nextTick(() => { this.drawWheel(); }); },
                 drawWheel() { const canvas = this.$refs.wheelCanvas; if (!canvas) return; const ctx = canvas.getContext('2d'); const contestants = [...this.system.contestants].sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0)); const len = contestants.length; if (len === 0) return; ctx.clearRect(0, 0, 300, 300); const center = 150; const radius = 145; const sliceAngle = (2 * Math.PI) / len; const colors = ['#eab308', '#ca8a04', '#d97706', '#b45309', '#78350f', '#f59e0b', '#facc15', '#ea580c']; for (let i = 0; i < len; i++) { const angle = i * sliceAngle; ctx.beginPath(); ctx.fillStyle = colors[i % colors.length]; ctx.moveTo(center, center); ctx.arc(center, center, radius, angle, angle + sliceAngle); ctx.closePath(); ctx.fill(); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 2; ctx.stroke(); ctx.save(); ctx.translate(center, center); ctx.rotate(angle + sliceAngle / 2); ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffffff'; ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4; ctx.font = `bold ${len > 10 ? 12 : 15}px sans-serif`; let text = contestants[i].name; if (text.length > 5) text = text.substring(0, 5) + '..'; ctx.fillText(text, radius - 20, 0); ctx.restore(); } },
-                spinWheel() { if (this.isSpinning) return; const contestants = [...this.system.contestants].sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0)); if (contestants.length === 0) return; this.isSpinning = true; this.selectedWheelContestant = null; const randIndex = Math.floor(Math.random() * contestants.length); const sliceAngle = 360 / contestants.length; this.wheelRotation += 360 * 8 + (360 - (randIndex * sliceAngle + sliceAngle / 2)); let clickInterval = 60; let elapsed = 0; const playTicks = () => { if (elapsed >= 7000) return; this.playClickSound(); elapsed += clickInterval; clickInterval *= 1.05; setTimeout(playTicks, clickInterval); }; playTicks(); setTimeout(async () => { this.isSpinning = false; const hitC = contestants[randIndex]; this.selectedWheelContestant = hitC; this.playWinSound(); await this.updateSetting({start_no: hitC.no}); }, 7000); },
+                
+                // 🌟 修复点2：精准计算旋转角度，确保转盘停下的名字和弹出的名字完全一致
+                spinWheel() { 
+                    if (this.isSpinning) return; 
+                    const contestants = [...this.system.contestants].sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0)); 
+                    if (contestants.length === 0) return; 
+                    this.isSpinning = true; 
+                    this.selectedWheelContestant = null; 
+                    
+                    const len = contestants.length;
+                    const randIndex = Math.floor(Math.random() * len); 
+                    const sliceAngle = 360 / len; 
+                    
+                    // 核心修正公式：让指针精准指向对应的扇形区域
+                    const targetAngle = 360 * 8 + (360 - (randIndex * sliceAngle + sliceAngle / 2));
+                    this.wheelRotation = targetAngle;
+
+                    let clickInterval = 60; let elapsed = 0; 
+                    const playTicks = () => { if (elapsed >= 7000) return; this.playClickSound(); elapsed += clickInterval; clickInterval *= 1.05; setTimeout(playTicks, clickInterval); }; 
+                    playTicks(); 
+                    
+                    setTimeout(async () => { 
+                        this.isSpinning = false; 
+                        const hitC = contestants[randIndex]; 
+                        this.selectedWheelContestant = hitC; 
+                        this.playWinSound(); 
+                        await this.updateSetting({start_no: hitC.no}); 
+                    }, 7000); 
+                },
 
                 getMe() { return this.system.judges.find(j => j.id === this.judgeId); }, getScoringC() { return this.system.contestants.find(c => c.id === this.scoringId); },
                 getMyScore(c) { const scores = this.system.currentRound == 1 ? c.r1Scores : (this.system.currentRound == 2 ? c.r2Scores : c.r3Scores); return Number(scores[this.judgeId]) || 0; },
