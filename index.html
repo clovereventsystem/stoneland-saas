@@ -369,7 +369,8 @@
                     showWheelModal: false, wheelRotation: 0, isSpinning: false, selectedWheelContestant: null, audioCtx: null,
                     selectedRevealId: '', showRevealModal: false, revealContestant: {}, revealedJudges: {}, rollingScores: {}, showFinalScoreBanner: false, animatedFinalScore: 0, allRevealed: false,
                     pollTimer: null, isFetching: false, loading: false,
-                    portalStep: 0, inputEventId: '', isChecking: false, setupData: { admin: '', judge: '' }
+                    portalStep: 0, inputEventId: '', isChecking: false, setupData: { admin: '', judge: '' },
+                    hasLoadedNames: false // 修复打字被打断的关键变量
                 }
             },
             computed: {
@@ -403,11 +404,43 @@
                 async checkEventId() { if (!this.inputEventId) return alert('请输入赛事编号'); this.isChecking = true; try { const res = await this.apiCall('/api/check-event', 'POST', { eventId: this.inputEventId }); if (!res.exists) { alert('⚠️ 赛事编号不存在，请联系客服。'); } else if (!res.isSetup) { this.portalStep = 2; } else { this.portalStep = 1; } } catch(e) { alert('验证失败'); } finally { this.isChecking = false; } },
                 async setupPasswords() { if (!this.setupData.admin || !this.setupData.judge) return alert('请填满两组密码'); this.isChecking = true; try { const res = await this.apiCall('/api/setup-event', 'POST', { eventId: this.inputEventId, adminPwd: this.setupData.admin, judgePwd: this.setupData.judge }); if (res.success) { alert('🎉 激活成功！可以直接登录'); this.portalStep = 1; } } catch(e) { alert('保存失败'); } finally { this.isChecking = false; } },
                 async checkLogin() { this.isChecking = true; try { const res = await this.apiCall('/api/login', 'POST', { eventId: this.inputEventId, password: this.inputPassword }); if (res.success) { this.role = res.role; this.view = this.role === 'admin' ? 'home' : this.role; this.isLoggedIn = true; localStorage.setItem('stoneRole', this.role); localStorage.setItem('stoneEventId', this.inputEventId); this.inputPassword = ''; this.fetchData(); this.startSmartPolling(); } else alert(res.message); } catch (e) { alert('登录失败'); } finally { this.isChecking = false; } },
-                logout() { this.isLoggedIn = false; this.portalStep = 0; this.inputEventId = ''; this.inputPassword = ''; localStorage.clear(); location.reload(); },
+                
+                logout() { 
+                    this.isLoggedIn = false; this.portalStep = 0; this.inputEventId = ''; this.inputPassword = ''; 
+                    this.hasLoadedNames = false; // 清除读取状态
+                    localStorage.clear(); location.reload(); 
+                },
+                
                 startSmartPolling() { if (this.pollTimer) clearInterval(this.pollTimer); this.pollTimer = setInterval(() => { if (this.isLoggedIn && !this.scoringId && !this.isFetching) this.fetchData(); }, 2000); },
                 async updateSetting(dataObj) { await this.apiCall('/api/events/settings', 'POST', { eventId: this.eventId, data: dataObj }); this.fetchData(); },
                 async dbManage(table, action, dataObj) { await this.apiCall('/api/manage', 'POST', { table, action, eventId: this.eventId, data: dataObj }); this.fetchData(); },
-                async fetchData() { if (!this.eventId && this.role !== 'boardOnly') return; try { this.isFetching = true; const res = await this.apiCall(`/api/system-data?eventId=${this.eventId}`); if (res.success) { let sys = res.system; const scoresData = res.scores || []; sys.contestants.forEach(c => { c.r1Scores = {}; c.r2Scores = {}; c.r3Scores = {}; scoresData.filter(s => s.contestant_id === String(c.id)).forEach(s => { if (s.round == 1) c.r1Scores[s.judge_id] = s.score; if (s.round == 2) c.r2Scores[s.judge_id] = s.score; if (s.round == 3) c.r3Scores[s.judge_id] = s.score; }); }); this.system = sys; this.editEventName = sys.eventName; this.editEventSubtitle = sys.eventSubtitle; if (this.role !== 'admin') this.applyRemoteRevealState(sys.revealState); } } catch(e) {} finally { this.isFetching = false; } },
+                
+                async fetchData() { 
+                    if (!this.eventId && this.role !== 'boardOnly') return; 
+                    try { 
+                        this.isFetching = true; 
+                        const res = await this.apiCall(`/api/system-data?eventId=${this.eventId}`); 
+                        if (res.success) { 
+                            let sys = res.system; 
+                            const scoresData = res.scores || []; 
+                            sys.contestants.forEach(c => { 
+                                c.r1Scores = {}; c.r2Scores = {}; c.r3Scores = {}; 
+                                scoresData.filter(s => s.contestant_id === String(c.id)).forEach(s => { if (s.round == 1) c.r1Scores[s.judge_id] = s.score; if (s.round == 2) c.r2Scores[s.judge_id] = s.score; if (s.round == 3) c.r3Scores[s.judge_id] = s.score; }); 
+                            }); 
+                            this.system = sys; 
+                            
+                            // 🌟 修复打字被打断：只在首次进入后台时读取，之后打字时不再强行覆盖
+                            if (!this.hasLoadedNames) {
+                                this.editEventName = sys.eventName; 
+                                this.editEventSubtitle = sys.eventSubtitle;
+                                this.hasLoadedNames = true;
+                            }
+
+                            if (this.role !== 'admin') this.applyRemoteRevealState(sys.revealState); 
+                        } 
+                    } catch(e) {} finally { this.isFetching = false; } 
+                },
+                
                 async changeFinalSeats(seats) { await this.updateSetting({final_seats: seats}); },
                 async toggleDetails() { await this.updateSetting({enable_details: !this.system.enableDetails}); },
                 async saveEventSettings() { await this.updateSetting({name: this.editEventName, subtitle: this.editEventSubtitle}); alert('保存成功'); },
