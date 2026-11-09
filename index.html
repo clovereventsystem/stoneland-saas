@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>STONELAND 赛事系统 (SaaS 版)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.3.4/vue.global.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        html, body { width: 100%; height: 100%; margin: 0; padding: 0; background-color: #0f172a; -webkit-overflow-scrolling: touch; overflow-y: auto; box-sizing: border-box; }
+        #app { width: 100%; min-height: 100vh; padding-top: max(16px, env(safe-area-inset-top)); padding-bottom: max(120px, env(safe-area-inset-bottom)) !important; padding-left: max(1rem, env(safe-area-inset-left)); padding-right: max(1rem, env(safe-area-inset-right)); }
+        input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        .btn-press { transition: transform 0.1s ease, background-color 0.15s ease; } .btn-press:active { transform: scale(0.95); }
+        @keyframes pulse-gold { 0%, 100% { box-shadow: 0 0 25px rgba(250, 204, 21, 0.4); } 50% { box-shadow: 0 0 50px rgba(250, 204, 21, 0.9); } }
+        .gold-glow { animation: pulse-gold 2s infinite; }
+        .wheel-container { position: relative; width: 300px; height: 300px; margin: 0 auto; }
+        .wheel-canvas { width: 100%; height: 100%; border-radius: 50%; border: 6px solid #eab308; box-shadow: 0 0 25px rgba(234, 179, 8, 0.5); transition: transform 7s cubic-bezier(0.12, 0.98, 0.12, 0.99); }
+        .wheel-pointer { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 15px solid transparent; border-right: 15px solid transparent; border-top: 25px solid #ef4444; z-index: 10; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
+        .perspective-1000 { perspective: 1000px; } .transform-style-3d { transform-style: preserve-3d; }
+        .backface-hidden { backface-visibility: hidden; } .rotate-y-180 { transform: rotateY(180deg); }
+        @keyframes slide-up { from { opacity: 0; transform: translateY(50px) scale(0.9); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .animate-slide-up { animation: slide-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    </style>
+</head>
+<body class="bg-slate-900 text-white font-sans select-none">
+    <div id="app" class="max-w-6xl mx-auto relative">
+        
+        <div v-if="system.isExpired && isLoggedIn" class="fixed inset-0 bg-slate-950/95 flex flex-col items-center justify-center z-[100] p-4 text-center backdrop-blur-md">
+            <div class="bg-slate-900 border-2 border-red-500 p-8 md:p-10 rounded-3xl max-w-lg w-full shadow-2xl">
+                <div class="text-6xl mb-4">⚠️</div><h1 class="text-3xl font-black text-red-500 mb-4">系统授权已到期</h1>
+                <p class="text-slate-300 text-lg mb-6">您的系统服务已于 <span class="font-black text-white">{{ system.expirationDate }}</span> 到期。</p>
+                <p class="text-slate-400 text-sm mb-8 bg-slate-800 p-4 rounded-xl border border-slate-700">请联系 STONELAND 系统服务商办理续费，以恢复赛事的正常运行与全部功能。</p>
+                <button onclick="location.reload()" class="w-full bg-red-600 text-white font-black py-4 rounded-xl shadow-lg btn-press">重新检查</button>
+            </div>
+        </div>
+
+        <div v-if="!isLoggedIn" class="fixed inset-0 bg-slate-900 flex flex-col items-center justify-center z-40 p-4">
+            <div class="bg-slate-800 p-8 md:p-10 rounded-3xl border border-yellow-600 shadow-2xl w-full max-w-md text-center">
+                <h1 class="text-4xl font-black text-yellow-500 mb-2 tracking-widest">STONELAND</h1>
+                <p class="text-slate-400 mb-8 text-xs tracking-widest">SAAS EVENT SYSTEM</p>
+                
+                <div v-if="portalStep === 0" class="animate-fade-in">
+                    <p class="text-yellow-400 font-bold mb-4">请输入您的专属赛事 ID</p>
+                    <input type="text" v-model="inputEventId" @keyup.enter="checkEventId" placeholder="例如: event_888" class="w-full bg-slate-900 text-center text-xl font-bold p-4 rounded-xl text-white border border-slate-600 mb-6 outline-none focus:border-yellow-500">
+                    <button @click="checkEventId" :disabled="isChecking" class="w-full bg-yellow-500 text-slate-900 text-lg font-black py-4 rounded-xl shadow-lg btn-press">{{ isChecking ? '验证中...' : '下一步 ➔' }}</button>
+                </div>
+
+                <div v-if="portalStep === 2" class="animate-fade-in text-left">
+                    <p class="text-emerald-400 font-bold mb-4 text-center text-lg">✨ 欢迎！请初始化系统密码</p>
+                    <p class="text-slate-400 text-xs text-center mb-6">赛事 ID: <span class="text-yellow-400 font-mono">{{ inputEventId }}</span> 首次进入，请保管好密码</p>
+                    
+                    <div class="mb-3">
+                        <label class="text-sm font-bold text-slate-300 ml-1">后台管理员密码</label>
+                        <input type="password" v-model="setupData.admin" class="w-full bg-slate-900 mt-1 p-3 rounded-xl border border-slate-600 outline-none text-white focus:border-emerald-500">
+                    </div>
+                    <div class="mb-8">
+                        <label class="text-sm font-bold text-slate-300 ml-1">评委打分台密码</label>
+                        <input type="password" v-model="setupData.judge" class="w-full bg-slate-900 mt-1 p-3 rounded-xl border border-slate-600 outline-none text-white focus:border-emerald-500">
+                    </div>
+                    <button @click="setupPasswords" :disabled="isChecking" class="w-full bg-emerald-500 text-slate-900 text-lg font-black py-4 rounded-xl shadow-lg btn-press">确认激活系统</button>
+                    <button @click="portalStep = 0" class="w-full text-slate-500 mt-4 text-sm hover:text-white">← 返回</button>
+                </div>
+
+                <div v-if="portalStep === 1" class="animate-fade-in">
+                    <p class="text-slate-300 mb-2 text-sm">赛事 ID: <span class="text-yellow-400 font-mono">{{ inputEventId }}</span></p>
+                    <p class="text-yellow-400 font-bold mb-6">请输入密码进入系统</p>
+                    <input type="password" v-model="inputPassword" @keyup.enter="checkLogin" placeholder="请输入密码" class="w-full bg-slate-900 text-center text-2xl font-bold p-4 rounded-xl text-yellow-400 border border-slate-600 mb-6 outline-none focus:border-yellow-500">
+                    <button @click="checkLogin" :disabled="isChecking" class="w-full bg-yellow-500 text-slate-900 text-xl font-black py-4 rounded-xl shadow-lg btn-press">登录</button>
+                    <button @click="portalStep = 0" class="w-full text-slate-500 mt-4 text-sm hover:text-white">← 切换赛事</button>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="showWheelModal && isPro" class="fixed inset-0 bg-slate-950/95 flex flex-col items-center justify-center z-50 p-4 animate-fade-in">
+            <div class="bg-slate-800 border-2 border-yellow-500 rounded-3xl p-6 md:p-8 max-w-md w-full text-center relative shadow-2xl">
+                <button @click="showWheelModal = false" class="absolute top-4 right-4 text-slate-400 hover:text-white font-bold text-xl">✕</button>
+                <h2 class="text-3xl font-black text-yellow-400 mb-1">🎰 现场选手抽签轮盘</h2>
+                <div class="wheel-container mb-6 mt-6">
+                    <div class="wheel-pointer"></div>
+                    <canvas ref="wheelCanvas" width="300" height="300" class="wheel-canvas" :style="{ transform: 'rotate(' + wheelRotation + 'deg)' }"></canvas>
+                </div>
+                <div v-if="selectedWheelContestant" class="bg-slate-900 border border-yellow-500/50 p-4 rounded-2xl mb-6 animate-bounce">
+                    <div class="text-xs text-yellow-500 font-bold mb-1">🎉 优先出场选手</div>
+                    <div class="text-3xl font-black text-white">No.{{ selectedWheelContestant.no }} {{ selectedWheelContestant.name }}</div>
+                </div>
+                <button @click="spinWheel" :disabled="isSpinning" class="w-full bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-black py-4 rounded-xl shadow-lg hover:brightness-110 btn-press disabled:opacity-50 text-lg">
+                    {{ isSpinning ? '转盘旋转中...' : '🎲 开始转盘抽签' }}
+                </button>
+            </div>
+        </div>
+
+        <!-- 3D 全屏亮分 -->
+        <div v-if="showRevealModal && isPro" class="fixed inset-0 bg-slate-950 flex flex-col items-center justify-between z-[100] p-6 md:p-10 animate-fade-in overflow-hidden">
+            <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(234,179,8,0.15),transparent_70%)] pointer-events-none"></div>
+            <button v-if="role === 'admin'" @click="closeRevealModal" class="absolute top-6 right-8 text-slate-500 hover:text-white font-black text-3xl z-[60] btn-press">✕</button>
+            
+            <div class="relative z-10 text-center mt-4">
+                <div class="inline-block bg-gradient-to-r from-yellow-600 to-yellow-500 text-slate-950 font-black text-xs px-6 py-2 rounded-full uppercase tracking-widest mb-4 shadow-[0_0_15px_rgba(250,204,21,0.5)]">⭐ FINALS ROUND 3 - LIVE REVEAL ⭐</div>
+                <div class="flex items-center justify-center gap-6">
+                    <img v-if="revealContestant.photo" :src="revealContestant.photo" class="w-24 h-24 rounded-full border-4 border-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.4)] object-cover">
+                    <div class="text-left">
+                        <h1 class="text-5xl md:text-6xl font-black text-white tracking-wide drop-shadow-lg">No.{{ revealContestant.no }} {{ revealContestant.name }}</h1>
+                        <p class="text-yellow-400 font-bold text-lg md:text-xl mt-2">演唱曲目：《{{ revealContestant.song3 || '未填写' }}》</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="relative z-10 w-full max-w-5xl flex flex-wrap justify-center gap-4 md:gap-6 my-auto perspective-1000">
+                <div v-for="j in system.judges" :key="j.id" class="relative w-36 h-48 md:w-48 md:h-64 transition-transform duration-700 transform-style-3d" :class="revealedJudges[j.id] ? 'rotate-y-180' : ''">
+                    <div class="absolute inset-0 backface-hidden bg-gradient-to-b from-slate-800 to-slate-900 border-2 border-slate-700 rounded-3xl flex flex-col items-center justify-center shadow-xl">
+                        <div class="text-5xl mb-4 opacity-40">🔒</div><div class="text-slate-500 font-bold text-sm tracking-widest">AWAITING</div>
+                    </div>
+                    <div class="absolute inset-0 backface-hidden bg-gradient-to-b from-slate-900 to-slate-800 border-2 border-yellow-400 rounded-3xl flex flex-col items-center justify-center shadow-[0_0_30px_rgba(250,204,21,0.3)] rotate-y-180">
+                        <img v-if="j.photo" :src="j.photo" class="w-16 h-16 rounded-full border-2 border-yellow-400 mb-3 object-cover shadow-lg">
+                        <div class="text-slate-300 font-bold text-sm mb-2">{{ j.name }}</div>
+                        <div class="text-5xl md:text-6xl font-black font-mono text-yellow-400 drop-shadow-[0_0_10px_rgba(250,204,21,0.8)]">{{ rollingScores[j.id] !== undefined ? rollingScores[j.id] : 0 }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="relative z-10 text-center w-full mb-6 min-h-[160px] flex flex-col items-center justify-end">
+                <div v-if="showFinalScoreBanner" class="gold-glow bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-slate-950 px-12 py-6 rounded-3xl mb-6 animate-slide-up shadow-[0_20px_50px_rgba(250,204,21,0.4)]">
+                    <div class="text-sm font-black tracking-widest text-slate-900/80 mb-1">FINAL SCORE (奥运计分法)</div>
+                    <div class="text-7xl font-black tracking-tighter">{{ animatedFinalScore }} <span class="text-3xl">分</span></div>
+                </div>
+                <div class="flex justify-center gap-4">
+                    <button v-if="role === 'admin' && getNextJudgeName()" @click="revealNextJudge" class="bg-yellow-500 text-slate-950 px-8 py-4 rounded-2xl font-black text-xl shadow-2xl hover:bg-yellow-400 btn-press">✨ 揭晓 {{ getNextJudgeName() }} 评分</button>
+                    <button v-if="role === 'admin' && getNextJudgeName()" @click="revealAllJudges" class="bg-amber-600 text-white px-6 py-4 rounded-2xl font-bold text-lg hover:bg-amber-500 btn-press">⚡ 一键全亮</button>
+                    <button v-if="role === 'admin' && !getNextJudgeName()" @click="closeRevealModal" class="bg-emerald-500 text-slate-950 px-10 py-4 rounded-2xl font-black text-xl shadow-2xl hover:bg-emerald-400 btn-press">💾 确认分值并返回排行榜</button>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="detailsC && isPro" class="fixed inset-0 bg-slate-950/90 flex items-center justify-center z-50 p-4">
+            <div class="bg-slate-800 p-6 rounded-3xl border border-blue-500 w-full max-w-sm">
+                <h2 class="text-2xl font-bold text-blue-400 mb-2">📊 各评委打分明细</h2>
+                <p class="text-slate-400 text-sm mb-6">选手：<span class="text-white font-bold">No.{{ detailsC.no }} {{ detailsC.name }}</span> (第 {{ system.currentRound }} 回合)</p>
+                <div class="space-y-3 max-h-64 overflow-y-auto pr-2">
+                    <div v-for="j in system.judges" :key="j.id" class="flex justify-between items-center bg-slate-900 p-3 rounded-lg border border-slate-700">
+                        <div class="flex items-center"><img v-if="j.photo" :src="j.photo" class="w-8 h-8 rounded-full mr-3 object-cover"><span class="font-bold text-slate-300">{{ j.name }}</span></div>
+                        <span class="text-xl font-black text-yellow-400">{{ getSpecificJudgeScore(detailsC, j.id) > 0 ? getSpecificJudgeScore(detailsC, j.id) + ' 分' : '未打分' }}</span>
+                    </div>
+                </div>
+                <button @click="detailsC = null" class="w-full mt-6 bg-slate-700 text-white font-bold py-3 rounded-xl btn-press">关闭</button>
+            </div>
+        </div>
+
+        <div v-if="showTop5Modal && isPro" class="fixed inset-0 bg-slate-950/90 flex items-center justify-center z-50 p-4">
+            <div class="bg-slate-800 p-6 rounded-3xl border border-yellow-500 w-full max-w-lg">
+                <h2 class="text-2xl font-bold text-yellow-400 mb-2">⭐ 前两回合晋级名单确认</h2>
+                <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                    <div v-for="(c, idx) in top5List" :key="c.id" class="bg-slate-900 p-4 rounded-xl border border-slate-700">
+                        <div class="flex justify-between items-center mb-2"><span class="font-bold text-lg text-yellow-400">#{{ idx + 1 }} No.{{ c.no }} {{ c.name }}</span><span class="text-xs bg-slate-800 text-slate-300 px-2 py-1 rounded">晋级总分: {{ getGrandTotal(c) }}分</span></div>
+                        <input v-model="c.song3" placeholder="决战歌曲名称" class="w-full bg-slate-800 p-2.5 rounded border border-slate-600 text-white text-sm outline-none focus:border-yellow-500">
+                    </div>
+                </div>
+                <div class="flex gap-4 mt-6"><button @click="saveTop5Songs" class="flex-1 bg-yellow-500 text-slate-900 font-black py-3 rounded-xl btn-press">💾 保存曲目</button><button @click="showTop5Modal = false" class="flex-1 bg-slate-700 text-white font-bold py-3 rounded-xl btn-press">取消</button></div>
+            </div>
+        </div>
+
+        <!-- 增删改 -->
+        <div v-if="showAddContestantModal" class="fixed inset-0 bg-slate-950/90 flex items-center justify-center z-50 p-4"><div class="bg-slate-800 p-6 rounded-3xl border border-yellow-500 w-full max-w-md"><h2 class="text-2xl font-bold text-yellow-400 mb-6">➕ 添加新参赛选手</h2><div class="space-y-3 max-h-[70vh] overflow-y-auto pr-1"><div class="bg-slate-900 p-3 rounded flex items-center"><img v-if="newC.photo" :src="newC.photo" class="w-14 h-14 rounded-full object-cover mr-4 border border-yellow-500"><input type="file" @change="handleContestantPhoto" class="text-xs text-slate-400"></div><input type="number" v-model.number="newC.no" placeholder="编号 (No.)" class="w-full bg-slate-900 p-3 rounded-lg border border-yellow-600 font-bold text-yellow-400 outline-none"><input v-model="newC.name" placeholder="姓名" class="w-full bg-slate-900 p-3 rounded-lg border border-slate-700 outline-none focus:border-yellow-500"><input v-model="newC.song1" placeholder="R1 曲目" class="w-full bg-slate-900 p-3 rounded-lg border border-slate-700 outline-none focus:border-yellow-500"><input v-model="newC.song2" placeholder="R2 曲目" class="w-full bg-slate-900 p-3 rounded-lg border border-slate-700 outline-none focus:border-yellow-500"></div><div class="flex gap-4 mt-6"><button @click="confirmAddContestant" class="flex-1 bg-yellow-500 text-slate-900 font-black py-3 rounded-xl btn-press">添加</button><button @click="showAddContestantModal=false" class="flex-1 bg-slate-700 text-white font-bold py-3 rounded-xl btn-press">取消</button></div></div></div>
+        <div v-if="showAddJudgeModal" class="fixed inset-0 bg-slate-950/90 flex items-center justify-center z-50 p-4"><div class="bg-slate-800 p-6 rounded-3xl border border-blue-500 w-full max-w-md"><h2 class="text-2xl font-bold text-blue-400 mb-6">➕ 添加新评委</h2><div class="space-y-4"><div class="bg-slate-900 p-3 rounded flex items-center"><img v-if="newJ.photo" :src="newJ.photo" class="w-14 h-14 rounded-full object-cover mr-4 border border-blue-500"><input type="file" @change="handleJudgePhoto" class="text-xs text-slate-400"></div><input v-model="newJ.name" placeholder="姓名 / 头衔" class="w-full bg-slate-900 p-3 rounded-lg outline-none focus:border-blue-500"></div><div class="flex gap-4 mt-6"><button @click="confirmAddJudge" class="flex-1 bg-blue-600 text-white font-black py-3 rounded-xl btn-press">添加</button><button @click="showAddJudgeModal=false" class="flex-1 bg-slate-700 text-white font-bold py-3 rounded-xl btn-press">取消</button></div></div></div>
+        <div v-if="editingJ" class="fixed inset-0 bg-slate-950/90 flex items-center justify-center z-50 p-4"><div class="bg-slate-800 p-6 rounded-3xl border border-blue-500 w-full max-w-md"><h2 class="text-2xl font-bold text-blue-400 mb-6">✏️ 修改评委</h2><div class="space-y-4"><div class="bg-slate-900 p-3 rounded flex items-center"><img v-if="editingJ.photo" :src="editingJ.photo" class="w-14 h-14 rounded-full object-cover mr-4 border border-blue-500"><input type="file" @change="handleEditJudgePhoto" class="text-xs text-slate-400"></div><input v-model="editingJ.name" class="w-full bg-slate-900 p-3 rounded-lg outline-none focus:border-blue-500"></div><div class="flex gap-4 mt-6"><button @click="saveEditJudge" class="flex-1 bg-blue-600 text-white font-black py-3 rounded-xl btn-press">保存</button><button @click="editingJ=null" class="flex-1 bg-slate-700 text-white font-bold py-3 rounded-xl btn-press">取消</button></div></div></div>
+        <div v-if="editingC" class="fixed inset-0 bg-slate-950/90 flex items-center justify-center z-50 p-4"><div class="bg-slate-800 p-6 rounded-3xl border border-yellow-500 w-full max-w-md"><h2 class="text-2xl font-bold text-yellow-400 mb-6">✏️ 修改选手</h2><div class="space-y-3 max-h-[70vh] overflow-y-auto pr-1"><div class="bg-slate-900 p-3 rounded flex items-center"><img v-if="editingC.photo" :src="editingC.photo" class="w-14 h-14 rounded-full object-cover mr-4 border border-yellow-500"><input type="file" @change="handleEditContestantPhoto" class="text-xs text-slate-400"></div><input type="number" v-model.number="editingC.no" class="w-full bg-slate-900 p-3 rounded-lg border border-yellow-600 text-yellow-400 font-bold outline-none"><input v-model="editingC.name" class="w-full bg-slate-900 p-3 rounded-lg border border-slate-700 outline-none"><input v-model="editingC.song1" class="w-full bg-slate-900 p-3 rounded-lg border border-slate-700 outline-none"><input v-model="editingC.song2" class="w-full bg-slate-900 p-3 rounded-lg border border-slate-700 outline-none"><input v-if="isPro" v-model="editingC.song3" placeholder="R3 曲目" class="w-full bg-slate-900 p-3 rounded-lg border border-yellow-600 text-yellow-300 outline-none"></div><div class="flex gap-4 mt-6"><button @click="saveEdit" class="flex-1 bg-yellow-500 text-slate-900 font-black py-3 rounded-xl btn-press">保存</button><button @click="editingC=null" class="flex-1 bg-slate-700 text-white font-bold py-3 rounded-xl btn-press">取消</button></div></div></div>
+
+        <!-- 主系统 -->
+        <div v-show="isLoggedIn && !system.isExpired">
+            <div v-if="view === 'home'" class="flex flex-col items-center justify-center min-h-[80vh]">
+                <h1 class="text-5xl font-black text-yellow-500 mb-1 tracking-widest">STONELAND</h1>
+                <div class="mb-6 flex items-center gap-2">
+                    <span class="text-xs text-slate-400 tracking-widest">ADMIN CONTROL PANEL</span>
+                    <span :class="isPro ? 'bg-amber-500 text-slate-950' : 'bg-slate-700 text-slate-300'" class="text-[10px] font-black px-2 py-0.5 rounded-full uppercase">{{ isPro ? '💎 专业版' : '🐣 基础版' }}</span>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-4xl mb-8">
+                    <button @click="view = 'admin'" class="bg-slate-800 border-2 border-slate-700 p-6 rounded-2xl hover:border-yellow-500 btn-press"><div class="text-4xl mb-3">⚙️</div><h2 class="text-xl font-bold">后台控制台</h2></button>
+                    <button @click="view = 'judge'" class="bg-slate-800 border-2 border-slate-700 p-6 rounded-2xl hover:border-yellow-500 btn-press"><div class="text-4xl mb-3">📱</div><h2 class="text-xl font-bold">评委打分台</h2></button>
+                    <button @click="view = 'board'" class="bg-slate-800 border-2 border-slate-700 p-6 rounded-2xl hover:border-yellow-500 btn-press"><div class="text-4xl mb-3">📺</div><h2 class="text-xl font-bold">观众大屏幕</h2></button>
+                </div>
+                <button v-if="isPro" @click="openWheelModal" class="w-full max-w-4xl bg-slate-800 border-2 border-yellow-500/60 p-4 rounded-2xl hover:border-yellow-400 btn-press flex items-center justify-center gap-3 mb-8"><span class="text-2xl">🎰</span><span class="text-lg font-black text-yellow-400">开启现场抽签轮盘</span></button>
+                <button @click="logout" class="text-slate-500 hover:text-red-400 text-sm">🔒 退出系统</button>
+            </div>
+
+            <div v-if="view === 'admin'" class="animate-fade-in">
+                <div class="flex justify-between items-center mb-6">
+                    <button @click="view = 'home'" class="bg-slate-800 hover:bg-slate-700 text-yellow-400 font-bold px-5 py-2.5 rounded-xl border border-slate-700 shadow btn-press">🏠 返回主目录</button>
+                    <div class="bg-slate-800 p-2 px-4 rounded-xl border border-slate-700 flex items-center gap-2">
+                        <span class="text-xs text-slate-400 font-bold">当前系统版本:</span>
+                        <span :class="isPro ? 'text-amber-400' : 'text-slate-300'" class="font-black text-sm">{{ isPro ? '💎 专业版' : '🐣 基础版' }}</span>
+                    </div>
+                </div>
+
+                <div v-if="!isPro" class="bg-slate-800/80 border border-slate-700 p-4 rounded-2xl text-center mb-6">
+                    <p class="text-xs text-slate-400">您当前使用的是基础版。如需解锁抽签轮盘、成绩单导出及 5 评委以上奥运计分等高级功能，请联系 STONELAND 客服在后台开通专业版。</p>
+                </div>
+
+                <div v-if="isPro" class="bg-slate-800 p-6 rounded-2xl mb-6 border border-amber-500/40 shadow-md flex items-center justify-between">
+                    <div><h2 class="text-xl font-bold text-amber-400 mb-1">🏅 决赛圈席位设置</h2></div>
+                    <div class="flex gap-2">
+                        <button @click="changeFinalSeats(5)" :class="system.finalSeats == 5 ? 'bg-amber-500 text-slate-950 font-black' : 'bg-slate-700 text-slate-300'" class="px-4 py-2 rounded-xl text-sm btn-press">5 强赛</button>
+                        <button @click="changeFinalSeats(10)" :class="system.finalSeats == 10 ? 'bg-amber-500 text-slate-950 font-black' : 'bg-slate-700 text-slate-300'" class="px-4 py-2 rounded-xl text-sm btn-press">10 强赛</button>
+                    </div>
+                </div>
+
+                <div v-if="isPro" class="bg-slate-800 p-6 rounded-2xl mb-6 border border-blue-500/40 shadow-md flex items-center justify-between">
+                    <div><h2 class="text-xl font-bold text-blue-400 mb-1">📊 评委打分明细功能开关</h2></div>
+                    <button @click="toggleDetails" :class="system.enableDetails ? 'bg-emerald-500 text-slate-950' : 'bg-slate-700 text-slate-400'" class="px-6 py-3 rounded-xl font-black btn-press shadow">{{ system.enableDetails ? '✅ 已开启' : '🚫 已禁用' }}</button>
+                </div>
+
+                <div v-if="isPro" class="flex gap-4 mb-6">
+                    <button @click="openWheelModal" class="flex-1 bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-black py-4 rounded-2xl shadow-lg btn-press text-lg">🎰 开启现场抽签轮盘</button>
+                    <button @click="downloadPDF" class="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-4 rounded-2xl shadow-lg btn-press text-lg">
+                        {{ loading ? '⏳ 生成中...' : '📥 下载成绩明细单 (PDF)' }}
+                    </button>
+                </div>
+
+                <div class="bg-slate-800 p-6 rounded-2xl mb-6 border border-yellow-600/50 shadow-md">
+                    <h2 class="text-xl font-bold text-yellow-400 mb-2">🏆 赛段进度控制</h2>
+                    <div class="flex flex-wrap gap-3 mt-4">
+                        <button @click="setRound(1)" :class="system.currentRound == 1 ? 'bg-yellow-500 text-slate-900 font-black' : 'bg-slate-700'" class="px-6 py-3 rounded-xl font-bold btn-press">第 1 回合</button>
+                        <button @click="setRound(2)" :class="system.currentRound == 2 ? 'bg-yellow-500 text-slate-900 font-black' : 'bg-slate-700'" class="px-6 py-3 rounded-xl font-bold btn-press">第 2 回合</button>
+                        <template v-if="isPro">
+                            <button @click="openTop5Modal" class="bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-900 px-6 py-3 rounded-xl font-black shadow-lg btn-press">⚡ 一键提取晋级名单</button>
+                            <button @click="setRound(3)" :class="system.currentRound == 3 ? 'bg-yellow-600 text-white shadow-[0_0_15px_rgba(202,138,4,0.5)] font-black' : 'bg-slate-700'" class="px-6 py-3 rounded-xl font-bold btn-press">⭐ 开启第3回合打分</button>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="bg-slate-800 p-6 rounded-2xl border border-purple-600/50 mb-6">
+                    <h2 class="text-xl font-bold text-purple-400 mb-4">🏷️ 赛事名称自定义</h2>
+                    <input v-model="editEventName" placeholder="主标题" class="w-full bg-slate-900 p-3 rounded mb-3 outline-none">
+                    <input v-model="editEventSubtitle" placeholder="副标题" class="w-full bg-slate-900 p-3 rounded mb-3 outline-none">
+                    <button @click="saveEventSettings" class="w-full bg-purple-600 py-3 rounded font-bold btn-press">💾 保存并同步大屏幕</button>
+                </div>
+
+                <div class="bg-slate-800 p-6 rounded-2xl mb-6 border-l-4 border-yellow-500 shadow-md">
+                    <h2 class="text-xl font-bold text-yellow-400 mb-2">📺 观众大屏幕免密投屏连结</h2>
+                    <div class="flex gap-2">
+                        <input readonly :value="boardLink" class="w-full bg-slate-900 p-3 rounded text-sm font-mono truncate outline-none text-emerald-400 font-bold border border-slate-700">
+                        <button @click="copyBoardLink" class="bg-yellow-500 text-slate-900 font-bold px-6 py-2 rounded-lg btn-press shadow-lg">{{ copyBtnText }}</button>
+                    </div>
+                </div>
+
+                <div class="bg-slate-800 p-6 rounded-2xl border border-blue-600/30 mb-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <div><h2 class="text-xl font-bold text-blue-400">🎖️ 评委管理 ({{ system.judges.length }} 人)</h2>
+                            <p class="text-xs text-slate-400" v-if="!isPro">基础版限制：最多 3 位评委</p>
+                        </div>
+                        <button @click="openAddJudgeModal" class="bg-blue-600 text-white px-4 py-2 rounded-xl font-bold text-sm btn-press">➕ 添加评委</button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div v-for="j in system.judges" :key="j.id" class="bg-slate-700 p-3 rounded flex justify-between items-center">
+                            <div class="flex items-center"><img v-if="j.photo" :src="j.photo" class="w-10 h-10 rounded-full object-cover mr-3"><span class="font-bold">{{ j.name }}</span></div>
+                            <div class="flex gap-2"><button @click="startEditJudge(j)" class="bg-blue-600 px-3 py-1 rounded text-xs btn-press">修改</button><button @click="removeJudge(j.id)" class="bg-red-500 px-3 py-1 rounded text-xs btn-press">移除</button></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-800 p-6 rounded-2xl border border-yellow-600/30 mb-6">
+                    <div class="flex justify-between items-center mb-4">
+                        <div><h2 class="text-xl font-bold text-yellow-400">🎤 选手列表 ({{ system.contestants.length }} 人)</h2>
+                            <p class="text-xs text-slate-400" v-if="!isPro">基础版限制：最多 20 位参赛者</p>
+                        </div>
+                        <button @click="openAddContestantModal" class="bg-yellow-500 text-slate-900 px-4 py-2 rounded-xl font-bold text-sm btn-press">➕ 添加选手</button>
+                    </div>
+                    <div class="space-y-2">
+                        <div v-for="c in orderedContestants" :key="c.id" class="bg-slate-700 p-3 rounded flex justify-between items-center">
+                            <div class="flex items-center">
+                                <span class="bg-yellow-500 text-slate-950 font-black text-xs px-2 py-1 rounded mr-3">No.{{ c.no }}</span>
+                                <img v-if="c.photo" :src="c.photo" class="w-12 h-12 rounded-full object-cover mr-3">
+                                <div><div class="font-bold text-lg">{{ c.name }}</div><div class="text-xs text-slate-400">R1: {{ c.song1 }} | R2: {{ c.song2 }} <span v-if="c.song3">| R3: {{ c.song3 }}</span></div></div>
+                            </div>
+                            <div class="flex gap-2"><button @click="startEdit(c)" class="bg-blue-600 px-3 py-1 rounded text-xs btn-press">修改</button><button @click="removeContestant(c.id)" class="bg-red-500 px-3 py-1 rounded text-xs btn-press">删除</button></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="view === 'judge'">
+                <button v-if="role === 'admin'" @click="view = 'home'" class="mb-4 bg-slate-800 text-yellow-400 font-bold px-4 py-2 rounded-xl border border-slate-700 shadow text-sm btn-press">🏠 返回主目录</button>
+                <div v-if="!judgeId" class="text-center mt-6 max-w-md mx-auto">
+                    <h2 class="text-2xl font-bold text-yellow-500 mb-6">请选择评审身份</h2>
+                    <button v-for="j in system.judges" :key="j.id" @click="judgeId = j.id" class="w-full bg-slate-800 p-4 rounded-xl font-bold mb-3 border border-slate-700 hover:border-yellow-500 flex items-center btn-press"><img v-if="j.photo" :src="j.photo" class="w-12 h-12 rounded-full object-cover mr-4"><div v-else class="w-12 h-12 rounded-full bg-slate-700 mr-4"></div><span class="text-xl">{{ j.name }}</span></button>
+                    <button @click="logout" class="mt-8 text-slate-500 text-sm block mx-auto">🔒 退出系统</button>
+                </div>
+                <div v-else class="max-w-md mx-auto">
+                    <div class="flex justify-between items-center mb-4"><button @click="judgeId = null" class="text-red-400 text-sm bg-red-900/30 px-3 py-1 rounded btn-press">退出换人</button><span class="text-yellow-500 font-bold">第 {{ system.currentRound }} 回合打分</span></div>
+                    <div class="bg-yellow-500 text-slate-900 p-3 rounded-xl font-black flex items-center justify-between mb-4 shadow-md px-4"><div class="flex items-center"><img v-if="getMe() && getMe().photo" :src="getMe().photo" class="w-8 h-8 rounded-full object-cover mr-2"><span>评审：{{ getMe() ? getMe().name : '' }}</span></div><button @click="resetAllScoresForCurrentJudge" class="bg-red-600 text-white text-xs px-2.5 py-1.5 rounded-lg font-bold btn-press shadow">⚠️ 清空打分</button></div>
+                    <div v-if="!scoringId" class="space-y-3">
+                        <div v-for="c in orderedActiveContestants" :key="c.id" class="bg-slate-800 p-4 rounded-xl flex items-center justify-between border border-slate-700">
+                            <div class="flex items-center flex-grow cursor-pointer" @click="startScoring(c.id)"><span class="bg-yellow-500 text-slate-950 font-black text-xs px-2 py-1 rounded mr-3">No.{{ c.no }}</span><img v-if="c.photo" :src="c.photo" class="w-12 h-12 rounded-full object-cover mr-3"><div><div class="font-bold text-lg">{{ c.name }}</div></div></div>
+                            <div class="text-right ml-2 flex flex-col items-end"><button v-if="isPro && system.enableDetails" @click.stop="detailsC = c" class="text-[11px] bg-blue-600 text-white font-bold px-2.5 py-1 rounded-lg mb-1 btn-press">📊 明细</button><div v-if="getMyScore(c) > 0" class="text-green-400 font-bold cursor-pointer text-sm" @click="startScoring(c.id)">{{ getMyScore(c) }} 分</div><div v-else class="text-slate-500 text-xs cursor-pointer" @click="startScoring(c.id)">未打分</div></div>
+                        </div>
+                    </div>
+                    <div v-else class="bg-slate-800 p-6 rounded-xl border border-yellow-600 shadow-2xl mb-8">
+                        <div class="flex items-center mb-4"><img v-if="getScoringC().photo" :src="getScoringC().photo" class="w-16 h-16 rounded-full object-cover mr-4 border-2 border-yellow-500"><div><span class="bg-yellow-500 text-slate-950 font-black text-xs px-2 py-0.5 rounded inline-block mb-1">No.{{ getScoringC().no }}</span><h2 class="text-2xl font-black mb-1">{{ getScoringC().name }}</h2></div></div>
+                        <div class="flex bg-slate-900 p-1 rounded-xl mb-6 border border-slate-700"><button @click="scoreMode = 'criteria'" :class="scoreMode === 'criteria' ? 'bg-yellow-500 text-slate-900 font-black' : 'text-slate-400 font-bold'" class="flex-1 py-2 text-xs rounded-lg transition">📊 分维度打分</button><button @click="switchToDirectMode" :class="scoreMode === 'direct' ? 'bg-yellow-500 text-slate-900 font-black' : 'text-slate-400 font-bold'" class="flex-1 py-2 text-xs rounded-lg transition">🎯 直接打总分</button></div>
+                        <div class="bg-slate-900 rounded-xl p-4 mb-6 text-center border border-slate-700"><div class="text-slate-400 text-sm mb-1">当前打出总分</div><div class="text-6xl font-black text-yellow-400">{{ currentCalculatedTotal }}</div></div>
+                        <div v-if="scoreMode === 'criteria'">
+                            <div v-for="item in criteriaConfig" :key="item.id" class="mb-6 bg-slate-900/60 p-4 rounded-xl border border-slate-700"><div class="flex justify-between items-center mb-3"><div><span class="font-bold text-slate-200 block">{{ item.name }}</span><span class="text-xs text-slate-500">满分 {{ item.max }}</span></div><div class="flex items-center bg-slate-900 rounded-lg border border-slate-600 px-2"><input type="number" v-model.number="tempScores[item.id]" @change="validateScore(item.id, item.max)" :max="item.max" min="0" class="w-14 h-10 bg-transparent text-yellow-400 text-xl font-black text-center outline-none"></div></div><input type="range" v-model.number="tempScores[item.id]" min="0" :max="item.max" class="w-full h-2 bg-slate-800 rounded-lg appearance-none accent-yellow-500 mb-3"><div class="flex gap-2"><button @click="changeScore(item.id, -1, item.max)" class="flex-1 bg-slate-800 py-2 rounded-lg font-bold btn-press">- 1</button><button @click="changeScore(item.id, -5, item.max)" class="flex-1 bg-slate-800 py-2 rounded-lg font-bold btn-press">- 5</button><button @click="changeScore(item.id, 5, item.max)" class="flex-1 bg-slate-800 py-2 rounded-lg font-bold btn-press">+ 5</button><button @click="changeScore(item.id, 1, item.max)" class="flex-1 bg-slate-800 py-2 rounded-lg font-bold btn-press">+ 1</button></div></div>
+                        </div>
+                        <div v-else class="mb-6 bg-slate-900/60 p-5 rounded-xl border border-yellow-500/50">
+                            <div class="flex justify-between items-center mb-4"><div><span class="font-bold text-slate-200 block text-base">选手最终得总分</span></div><div class="flex items-center bg-slate-900 rounded-lg border border-yellow-500 px-3 py-1"><input type="number" v-model.number="directScore" @change="validateDirectScore" max="100" min="0" class="w-16 h-10 bg-transparent text-yellow-400 text-2xl font-black text-center outline-none"></div></div><input type="range" v-model.number="directScore" min="0" max="100" class="w-full h-3 bg-slate-800 rounded-lg appearance-none accent-yellow-500 mb-5"><div class="flex gap-2"><button @click="changeDirectScore(-1)" class="flex-1 bg-slate-800 py-3 rounded-lg font-bold btn-press">- 1</button><button @click="changeDirectScore(-5)" class="flex-1 bg-slate-800 py-3 rounded-lg font-bold btn-press">- 5</button><button @click="changeDirectScore(5)" class="flex-1 bg-slate-800 py-3 rounded-lg font-bold btn-press">+ 5</button><button @click="changeDirectScore(1)" class="flex-1 bg-slate-800 py-3 rounded-lg font-bold btn-press">+ 1</button></div>
+                        </div>
+                        <button @click="submitScore" class="w-full bg-yellow-500 text-slate-900 text-xl font-black py-4 rounded-xl mt-4 btn-press">确认提交</button>
+                        <button @click="scoringId = null" class="w-full text-slate-400 py-4 mt-2">← 取消</button>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="view === 'board'" class="bg-slate-900 rounded-3xl p-6 md:p-8 min-h-[80vh] relative">
+                <button v-if="role !== 'boardOnly' && role === 'admin'" @click="view = 'home'" class="absolute top-4 left-4 bg-slate-800 text-yellow-400 font-bold px-4 py-2 rounded-xl border border-slate-700 shadow text-sm z-10 btn-press">🏠 返回主目录</button>
+                <h1 class="text-4xl md:text-5xl font-black text-center text-white mb-2 mt-4">{{ system.eventName }}</h1>
+                <p class="text-center text-yellow-500 tracking-[0.3em] font-bold text-sm mb-8">{{ system.currentRound == 3 ? `⭐ 第 3 回合：${system.finalSeats || 5}强巅峰决战排行榜 ⭐` : system.eventSubtitle }}</p>
+
+                <div v-if="system.currentRound == 3 && role === 'admin' && isPro" class="bg-gradient-to-r from-slate-800 via-amber-950 to-slate-800 border-2 border-yellow-500/60 p-4 rounded-2xl mb-8 flex flex-wrap items-center justify-between gap-4 shadow-xl">
+                    <div class="flex items-center gap-2"><span class="text-2xl">🎤</span><div><div class="text-yellow-400 font-bold text-sm">第 3 回合现场亮分控制台</div><div class="text-slate-400 text-xs">大屏幕将自动弹出滚动亮分界面</div></div></div>
+                    <div class="flex items-center gap-3">
+                        <select v-model="selectedRevealId" class="bg-slate-900 text-yellow-300 border border-yellow-500 font-bold px-4 py-2 rounded-xl text-sm outline-none">
+                            <option value="">-- 请选择亮分选手 --</option><option v-for="c in activeContestants" :key="c.id" :value="c.id">No.{{ c.no }} {{ c.name }}</option>
+                        </select>
+                        <button @click="startLiveReveal" class="bg-yellow-500 text-slate-950 font-black px-6 py-2 rounded-xl text-sm btn-press">🎬 启动全屏亮分</button>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left">
+                        <thead>
+                            <tr class="text-slate-400 border-b-2 border-slate-700 text-sm">
+                                <th class="pb-3 text-center w-16">排位</th>
+                                <th class="pb-3 pl-4">选手姓名</th>
+                                <template v-if="system.currentRound == 3"><th class="pb-3 text-center text-slate-500">前两回合总分</th><th class="pb-3 text-center text-yellow-400 text-lg">⭐ 决赛得分</th></template>
+                                <template v-else-if="system.currentRound == 2"><th class="pb-3 text-center">回合 1</th><th class="pb-3 text-center">回合 2</th><th class="pb-3 text-right text-yellow-500 text-lg">晋级总分</th></template>
+                                <template v-else><th class="pb-3 text-right text-yellow-500 text-lg">得分</th></template>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="(c, index) in sortedContestants" :key="c.id" class="border-b border-slate-800 hover:bg-slate-800/40">
+                                <td class="py-4 text-center font-black text-xl">
+                                    <div v-if="index === 0 && getDisplayScore(c) > 0" class="w-12 h-12 mx-auto bg-yellow-400 text-slate-900 rounded-full flex items-center justify-center text-2xl shadow-[0_0_15px_rgba(250,204,21,0.6)]">👑</div>
+                                    <div v-else-if="index === 1 && getDisplayScore(c) > 0" class="w-9 h-9 mx-auto bg-slate-300 text-slate-900 rounded-full flex items-center justify-center">2</div>
+                                    <div v-else-if="index === 2 && getDisplayScore(c) > 0" class="w-9 h-9 mx-auto bg-amber-600 text-white rounded-full flex items-center justify-center">3</div>
+                                    <div v-else class="text-slate-500">{{ getDisplayScore(c) > 0 ? index + 1 : '-' }}</div>
+                                </td>
+                                <td class="py-4 pl-4 font-bold text-2xl flex items-center"><span class="bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 font-mono text-sm px-2.5 py-1 rounded-lg mr-3">No.{{ c.no }}</span><img v-if="c.photo" :src="c.photo" class="w-12 h-12 rounded-full object-cover mr-4">{{ c.name }}</td>
+                                <template v-if="system.currentRound == 3"><td class="py-4 text-center text-slate-400 font-mono text-lg">{{ getRoundTotal(c, 1) + getRoundTotal(c, 2) }} 分</td><td class="py-4 text-center text-yellow-400 font-mono text-3xl font-black">{{ getRoundTotal(c, 3) || '-' }}</td></template>
+                                <template v-else-if="system.currentRound == 2"><td class="py-4 text-center text-slate-400 font-mono text-lg">{{ getRoundTotal(c, 1) || '-' }}</td><td class="py-4 text-center text-slate-400 font-mono text-lg">{{ getRoundTotal(c, 2) || '-' }}</td><td class="py-4 text-right font-black text-3xl text-yellow-400 font-mono">{{ getGrandTotal(c) }}</td></template>
+                                <template v-else><td class="py-4 text-right font-black text-3xl text-yellow-400 font-mono">{{ getRoundTotal(c, 1) }}</td></template>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        Vue.createApp({
+            data() {
+                return {
+                    criteriaConfig: [{ id: 'pitch', name: '音准', max: 30 }, { id: 'tech', name: '技巧', max: 30 }, { id: 'emotion', name: '情感', max: 20 }, { id: 'stage', name: '台风', max: 20 }],
+                    isLoggedIn: false, role: null, inputPassword: '', view: 'home', judgeId: null, scoringId: null, tempScores: {}, scoreMode: 'direct', directScore: 80,
+                    system: { currentRound: 1, contestants: [], judges: [], eventName: '', eventSubtitle: '', revealState: {}, startNo: 1, enableDetails: true, systemVersion: 'Basic', finalSeats: 5 },
+                    editEventName: '', editEventSubtitle: '', detailsC: null, copyBtnText: '📋 复制',
+                    showAddContestantModal: false, showAddJudgeModal: false, showTop5Modal: false, top5List: [],
+                    newC: { no: 1, name: '', song1: '', song2: '', song3: '', photo: null }, newJ: { name: '', photo: null }, editingC: null, editingJ: null, 
+                    showWheelModal: false, wheelRotation: 0, isSpinning: false, selectedWheelContestant: null, audioCtx: null,
+                    selectedRevealId: '', showRevealModal: false, revealContestant: {}, revealedJudges: {}, rollingScores: {}, showFinalScoreBanner: false, animatedFinalScore: 0, allRevealed: false,
+                    pollTimer: null, isFetching: false, loading: false,
+                    portalStep: 0, inputEventId: '', isChecking: false, setupData: { admin: '', judge: '' }
+                }
+            },
+            computed: {
+                eventId() { return this.inputEventId; }, 
+                boardLink() { return window.location.origin + window.location.pathname + '?view=board&eventId=' + (this.eventId || ''); },
+                isPro() { return String(this.system.systemVersion).toLowerCase() === 'pro'; },
+                sortedContestants() { let baseList = [...this.orderedContestants]; if (this.system.currentRound == 3) { return baseList.sort((a, b) => Number(this.getGrandTotal(b)) - Number(this.getGrandTotal(a))).slice(0, this.system.finalSeats).sort((a, b) => Number(this.getRoundTotal(b, 3)) - Number(this.getRoundTotal(a, 3))); } else if (this.system.currentRound == 2) { return baseList.sort((a, b) => Number(this.getGrandTotal(b)) - Number(this.getGrandTotal(a))); } else { return baseList.sort((a, b) => Number(this.getRoundTotal(b, 1)) - Number(this.getRoundTotal(a, 1))); } },
+                orderedContestants() { let list = [...this.system.contestants].sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0)); if (list.length === 0 || !this.isPro) return list; const idx = list.findIndex(c => Number(c.no) >= (Number(this.system.startNo) || 1)); return idx <= 0 ? list : [...list.slice(idx), ...list.slice(0, idx)]; },
+                activeContestants() { return this.system.currentRound == 3 ? [...this.system.contestants].sort((a, b) => Number(this.getGrandTotal(b)) - Number(this.getGrandTotal(a))).slice(0, this.system.finalSeats) : this.system.contestants; },
+                orderedActiveContestants() { return this.system.currentRound == 3 ? this.activeContestants : this.orderedContestants; },
+                currentCalculatedTotal() { if (this.scoreMode === 'direct') return Number(this.directScore) || 0; let t = 0; for(let k in this.tempScores){ t += (Number(this.tempScores[k]) || 0); } return t; }
+            },
+            mounted() {
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.get('view') === 'board') { 
+                    this.isLoggedIn = true; this.role = 'boardOnly'; this.view = 'board'; 
+                    this.inputEventId = urlParams.get('eventId') || ''; 
+                    this.fetchData(); this.startSmartPolling();
+                } else {
+                    const savedRole = localStorage.getItem('stoneRole'); const savedEventId = localStorage.getItem('stoneEventId');
+                    if (savedRole && savedEventId) { 
+                        this.isLoggedIn = true; this.role = savedRole; this.inputEventId = savedEventId; 
+                        this.view = savedRole === 'admin' ? 'home' : (savedRole === 'board' ? 'board' : 'judge'); 
+                        this.fetchData(); this.startSmartPolling();
+                    }
+                }
+            },
+            beforeUnmount() { if (this.pollTimer) clearInterval(this.pollTimer); },
+            methods: {
+                async apiCall(endpoint, method = 'GET', body = null) { const opts = { method, headers: { 'Content-Type': 'application/json' } }; if (body) opts.body = JSON.stringify(body); const res = await fetch(window.location.origin + endpoint, opts); return res.json(); },
+                async checkEventId() { if (!this.inputEventId) return alert('请输入赛事编号'); this.isChecking = true; try { const res = await this.apiCall('/api/check-event', 'POST', { eventId: this.inputEventId }); if (!res.exists) { alert('⚠️ 赛事编号不存在，请联系客服。'); } else if (!res.isSetup) { this.portalStep = 2; } else { this.portalStep = 1; } } catch(e) { alert('验证失败'); } finally { this.isChecking = false; } },
+                async setupPasswords() { if (!this.setupData.admin || !this.setupData.judge) return alert('请填满两组密码'); this.isChecking = true; try { const res = await this.apiCall('/api/setup-event', 'POST', { eventId: this.inputEventId, adminPwd: this.setupData.admin, judgePwd: this.setupData.judge }); if (res.success) { alert('🎉 激活成功！可以直接登录'); this.portalStep = 1; } } catch(e) { alert('保存失败'); } finally { this.isChecking = false; } },
+                async checkLogin() { this.isChecking = true; try { const res = await this.apiCall('/api/login', 'POST', { eventId: this.inputEventId, password: this.inputPassword }); if (res.success) { this.role = res.role; this.view = this.role === 'admin' ? 'home' : this.role; this.isLoggedIn = true; localStorage.setItem('stoneRole', this.role); localStorage.setItem('stoneEventId', this.inputEventId); this.inputPassword = ''; this.fetchData(); this.startSmartPolling(); } else alert(res.message); } catch (e) { alert('登录失败'); } finally { this.isChecking = false; } },
+                logout() { this.isLoggedIn = false; this.portalStep = 0; this.inputEventId = ''; this.inputPassword = ''; localStorage.clear(); location.reload(); },
+                startSmartPolling() { if (this.pollTimer) clearInterval(this.pollTimer); this.pollTimer = setInterval(() => { if (this.isLoggedIn && !this.scoringId && !this.isFetching) this.fetchData(); }, 2000); },
+                async updateSetting(dataObj) { await this.apiCall('/api/events/settings', 'POST', { eventId: this.eventId, data: dataObj }); this.fetchData(); },
+                async dbManage(table, action, dataObj) { await this.apiCall('/api/manage', 'POST', { table, action, eventId: this.eventId, data: dataObj }); this.fetchData(); },
+                async fetchData() { if (!this.eventId && this.role !== 'boardOnly') return; try { this.isFetching = true; const res = await this.apiCall(`/api/system-data?eventId=${this.eventId}`); if (res.success) { let sys = res.system; const scoresData = res.scores || []; sys.contestants.forEach(c => { c.r1Scores = {}; c.r2Scores = {}; c.r3Scores = {}; scoresData.filter(s => s.contestant_id === String(c.id)).forEach(s => { if (s.round == 1) c.r1Scores[s.judge_id] = s.score; if (s.round == 2) c.r2Scores[s.judge_id] = s.score; if (s.round == 3) c.r3Scores[s.judge_id] = s.score; }); }); this.system = sys; this.editEventName = sys.eventName; this.editEventSubtitle = sys.eventSubtitle; if (this.role !== 'admin') this.applyRemoteRevealState(sys.revealState); } } catch(e) {} finally { this.isFetching = false; } },
+                async changeFinalSeats(seats) { await this.updateSetting({final_seats: seats}); },
+                async toggleDetails() { await this.updateSetting({enable_details: !this.system.enableDetails}); },
+                async saveEventSettings() { await this.updateSetting({name: this.editEventName, subtitle: this.editEventSubtitle}); alert('保存成功'); },
+                async setRound(r) { await this.updateSetting({current_round: r}); },
+                
+                openAddContestantModal() { if (!this.isPro && this.system.contestants.length >= 20) return alert('【基础版限制】最多 20 名参赛选手。请联系客服升级至专业版！'); this.newC = { no: this.system.contestants.length + 1, name: '', song1: '', song2: '', song3: '', photo: null }; this.showAddContestantModal = true; },
+                async confirmAddContestant() { if(!this.newC.name) return; await this.dbManage('contestants', 'add', { id: 'c'+Date.now(), ...this.newC }); this.showAddContestantModal = false; },
+                openAddJudgeModal() { if (!this.isPro && this.system.judges.length >= 3) return alert('【基础版限制】最多 3 名评委。请联系客服升级至专业版！'); this.newJ = { name: '', photo: null }; this.showAddJudgeModal = true; },
+                async confirmAddJudge() { if(!this.newJ.name) return; await this.dbManage('judges', 'add', { id: 'j'+Date.now(), ...this.newJ }); this.showAddJudgeModal = false; },
+                startEditJudge(j) { this.editingJ = { ...j }; }, async saveEditJudge() { await this.dbManage('judges', 'update', { id: this.editingJ.id, name: this.editingJ.name, photo: this.editingJ.photo }); this.editingJ = null; },
+                openTop5Modal() { const sorted = [...this.system.contestants].sort((a, b) => Number(this.getGrandTotal(b)) - Number(this.getGrandTotal(a))); this.top5List = JSON.parse(JSON.stringify(sorted.slice(0, Number(this.system.finalSeats)||5))); this.showTop5Modal = true; },
+                async saveTop5Songs() { this.showTop5Modal = false; await this.setRound(3); for(let c of this.top5List) { await this.dbManage('contestants', 'update', { id: c.id, song3: c.song3 }); } },
+                async removeJudge(id) { if(confirm('确定移除？')) await this.dbManage('judges', 'delete', { id }); },
+                async removeContestant(id) { if(confirm('确定删除？')) await this.dbManage('contestants', 'delete', { id }); },
+                startEdit(c) { this.editingC = { ...c }; }, async saveEdit() { await this.dbManage('contestants', 'update', { id: this.editingC.id, name: this.editingC.name, no: this.editingC.no, song1: this.editingC.song1, song2: this.editingC.song2, song3: this.editingC.song3, photo: this.editingC.photo }); this.editingC = null; },
+                
+                async submitScore() { const sid = this.scoringId; const c = this.system.contestants.find(item => item.id === sid); if(c) c.isSyncing = true; this.scoringId = null; await this.apiCall('/api/scores/submit', 'POST', { contestantId: sid, round: this.system.currentRound, judgeId: this.judgeId, score: Number(this.currentCalculatedTotal) }); await this.fetchData(); },
+                async resetScore(id) { if(confirm('确定撤销吗？')) { await this.apiCall('/api/scores/delete', 'POST', { contestantId: id, round: this.system.currentRound, judgeId: this.judgeId }); await this.fetchData(); } },
+                async resetAllScoresForCurrentJudge() { if (confirm('确定清空打分吗？无法撤销！')) { await this.apiCall('/api/scores/delete', 'POST', { round: this.system.currentRound, judgeId: this.judgeId }); alert('已清空'); await this.fetchData(); } },
+                
+                async syncRevealToBackend() {
+                    if (this.role !== 'admin' || !this.isPro) return;
+                    const adminScores = {}; this.system.judges.forEach(j => { adminScores[j.id] = Number(this.getSpecificJudgeScore(this.revealContestant, j.id)) || 0; });
+                    await this.updateSetting({reveal_state: { show: this.showRevealModal, contestantId: this.revealContestant.id, revealedJudges: this.revealedJudges, revealedCount: this.revealedCount, showFinalScoreBanner: this.showFinalScoreBanner, allRevealed: this.allRevealed, adminTotal: this.getRoundTotal(this.revealContestant, 3), adminScores: adminScores }});
+                },
+                
+                applyRemoteRevealState(remote) {
+                    if (!this.isPro || !remote || remote.show !== true) { this.showRevealModal = false; return; }
+                    const c = this.system.contestants.find(item => item.id == remote.contestantId); if (!c) return;
+                    this.revealContestant = c; this.showRevealModal = true; this.revealedJudges = remote.revealedJudges || {}; this.revealedCount = remote.revealedCount || 0; this.allRevealed = remote.allRevealed || false;
+                    const adminScores = remote.adminScores || {};
+                    this.system.judges.forEach(j => {
+                        const targetScore = adminScores[j.id] || 0;
+                        if (this.revealedJudges[j.id] && this.rollingScores[j.id] === undefined) { 
+                            this.rollingScores[j.id] = 0;
+                            setTimeout(() => { let curr = 0; let inc = targetScore / 15 || 1; let tm = setInterval(() => { curr += inc; if(curr >= targetScore){ curr = targetScore; clearInterval(tm); } this.rollingScores[j.id] = Math.round(curr); }, 50); }, 200);
+                        } else if (!this.revealedJudges[j.id]) { this.rollingScores[j.id] = undefined; } 
+                        else { this.rollingScores[j.id] = targetScore; }
+                    });
+                    if (remote.showFinalScoreBanner && !this.showFinalScoreBanner) {
+                        this.showFinalScoreBanner = true; const realTotal = remote.adminTotal || 0; let current = 0; let timer = setInterval(() => { current += Math.ceil(realTotal / 20) || 1; if (current >= realTotal) { current = realTotal; clearInterval(timer); } this.animatedFinalScore = current; }, 40);
+                    } else if (!remote.showFinalScoreBanner) { this.showFinalScoreBanner = false; this.animatedFinalScore = 0; }
+                },
+
+                async startLiveReveal() { if (!this.selectedRevealId) return alert('请选择选手'); const c = this.system.contestants.find(item => item.id == this.selectedRevealId); if (!c) return; this.revealContestant = c; this.revealedJudges = {}; this.rollingScores = {}; this.revealedCount = 0; this.showFinalScoreBanner = false; this.animatedFinalScore = 0; this.allRevealed = false; this.showRevealModal = true; await this.syncRevealToBackend(); },
+                getNextJudgeName() { const next = this.system.judges.find(j => !this.revealedJudges[j.id]); return next ? next.name : ''; },
+                async revealNextJudge() { 
+                    const unrevealed = this.system.judges.filter(j => !this.revealedJudges[j.id]); if (unrevealed.length === 0) return;
+                    const judge = unrevealed[0]; const targetScore = Number(this.getSpecificJudgeScore(this.revealContestant, judge.id)) || 0; 
+                    this.revealedJudges[judge.id] = true; this.rollingScores[judge.id] = 0; await this.syncRevealToBackend(); 
+                    setTimeout(() => { let current = 0; let increment = targetScore / 15 || 1; let timer = setInterval(() => { current += increment; if (current >= targetScore) { current = targetScore; clearInterval(timer); } this.rollingScores[judge.id] = Math.round(current); }, 50); }, 100); 
+                    this.revealedCount++; if (unrevealed.length === 1) { this.allRevealed = true; setTimeout(() => { this.triggerFinalScoreBanner(); }, 1000); } 
+                },
+                async revealAllJudges() { this.system.judges.forEach(j => { this.revealedJudges[j.id] = true; this.rollingScores[j.id] = Number(this.getSpecificJudgeScore(this.revealContestant, j.id)) || 0; }); this.revealedCount = this.system.judges.length; this.allRevealed = true; await this.syncRevealToBackend(); setTimeout(() => { this.triggerFinalScoreBanner(); }, 500); },
+                async triggerFinalScoreBanner() { if (this.showFinalScoreBanner) return; this.showFinalScoreBanner = true; const realTotal = this.getRoundTotal(this.revealContestant, 3); let current = 0; let timer = setInterval(() => { current += Math.ceil(realTotal / 20) || 1; if (current >= realTotal) { current = realTotal; clearInterval(timer); } this.animatedFinalScore = current; }, 40); await this.syncRevealToBackend(); },
+                async closeRevealModal() { this.showRevealModal = false; await this.syncRevealToBackend(); },
+
+                playClickSound() { try { if (!this.audioCtx) this.audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if (this.audioCtx.state === 'suspended') this.audioCtx.resume(); const osc = this.audioCtx.createOscillator(); const gain = this.audioCtx.createGain(); osc.type = 'triangle'; osc.frequency.setValueAtTime(600, this.audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(150, this.audioCtx.currentTime + 0.04); gain.gain.setValueAtTime(0.3, this.audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.01, this.audioCtx.currentTime + 0.04); osc.connect(gain); gain.connect(this.audioCtx.destination); osc.start(); osc.stop(this.audioCtx.currentTime + 0.04); } catch (e) {} },
+                playWinSound() { try { if (!this.audioCtx) return; [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => { const osc = this.audioCtx.createOscillator(); const gain = this.audioCtx.createGain(); osc.type = 'sine'; osc.frequency.value = freq; const startTime = this.audioCtx.currentTime + (i * 0.1); gain.gain.setValueAtTime(0.3, startTime); gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.3); osc.connect(gain); gain.connect(this.audioCtx.destination); osc.start(startTime); osc.stop(startTime + 0.3); }); } catch (e) {} },
+                compressImg(file, cb) { if(!file) return; const reader = new FileReader(); reader.onload = (e) => { const img = new Image(); img.src = e.target.result; img.onload = () => { const canvas = document.createElement('canvas'); canvas.width = 120; canvas.height = 120; canvas.getContext('2d').drawImage(img, 0, 0, 120, 120); cb(canvas.toDataURL('image/jpeg', 0.6)); } }; reader.readAsDataURL(file); },
+                handleContestantPhoto(e) { this.compressImg(e.target.files[0], d => this.newC.photo = d); }, handleJudgePhoto(e) { this.compressImg(e.target.files[0], d => this.newJ.photo = d); }, handleEditContestantPhoto(e) { this.compressImg(e.target.files[0], d => this.editingC.photo = d); }, handleEditJudgePhoto(e) { this.compressImg(e.target.files[0], d => this.editingJ.photo = d); },
+                openWheelModal() { this.showWheelModal = true; this.selectedWheelContestant = null; this.$nextTick(() => { this.drawWheel(); }); },
+                drawWheel() { const canvas = this.$refs.wheelCanvas; if (!canvas) return; const ctx = canvas.getContext('2d'); const contestants = [...this.system.contestants].sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0)); const len = contestants.length; if (len === 0) return; ctx.clearRect(0, 0, 300, 300); const center = 150; const radius = 145; const sliceAngle = (2 * Math.PI) / len; const colors = ['#eab308', '#ca8a04', '#d97706', '#b45309', '#78350f', '#f59e0b', '#facc15', '#ea580c']; for (let i = 0; i < len; i++) { const angle = i * sliceAngle; ctx.beginPath(); ctx.fillStyle = colors[i % colors.length]; ctx.moveTo(center, center); ctx.arc(center, center, radius, angle, angle + sliceAngle); ctx.closePath(); ctx.fill(); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 2; ctx.stroke(); ctx.save(); ctx.translate(center, center); ctx.rotate(angle + sliceAngle / 2); ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffffff'; ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4; ctx.font = `bold ${len > 10 ? 12 : 15}px sans-serif`; let text = contestants[i].name; if (text.length > 5) text = text.substring(0, 5) + '..'; ctx.fillText(text, radius - 20, 0); ctx.restore(); } },
+                spinWheel() { if (this.isSpinning) return; const contestants = [...this.system.contestants].sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0)); if (contestants.length === 0) return; this.isSpinning = true; this.selectedWheelContestant = null; const randIndex = Math.floor(Math.random() * contestants.length); const sliceAngle = 360 / contestants.length; this.wheelRotation += 360 * 8 + (360 - (randIndex * sliceAngle + sliceAngle / 2)); let clickInterval = 60; let elapsed = 0; const playTicks = () => { if (elapsed >= 7000) return; this.playClickSound(); elapsed += clickInterval; clickInterval *= 1.05; setTimeout(playTicks, clickInterval); }; playTicks(); setTimeout(async () => { this.isSpinning = false; const hitC = contestants[randIndex]; this.selectedWheelContestant = hitC; this.playWinSound(); await this.updateSetting({start_no: hitC.no}); }, 7000); },
+
+                getMe() { return this.system.judges.find(j => j.id === this.judgeId); }, getScoringC() { return this.system.contestants.find(c => c.id === this.scoringId); },
+                getMyScore(c) { const scores = this.system.currentRound == 1 ? c.r1Scores : (this.system.currentRound == 2 ? c.r2Scores : c.r3Scores); return Number(scores[this.judgeId]) || 0; },
+                getSpecificJudgeScore(c, jId) { if (!c) return 0; const scores = this.system.currentRound == 1 ? c.r1Scores : (this.system.currentRound == 2 ? c.r2Scores : c.r3Scores); return Number(scores[jId]) || 0; },
+                startScoring(id) { this.scoringId = id; this.tempScores = {}; this.criteriaConfig.forEach(i => { this.tempScores[i.id] = 0; }); const c = this.system.contestants.find(item => item.id === id); const ex = this.getMyScore(c); this.directScore = ex > 0 ? ex : 80; },
+                switchToDirectMode() { this.scoreMode = 'direct'; if (!this.directScore) this.directScore = 80; },
+                changeScore(id, delta, maxVal) { let newVal = (Number(this.tempScores[id]) || 0) + delta; if (newVal < 0) newVal = 0; if (newVal > maxVal) newVal = maxVal; this.tempScores[id] = newVal; },
+                validateScore(id, maxVal) { let val = Number(this.tempScores[id]) || 0; if (val < 0) this.tempScores[id] = 0; if (val > maxVal) this.tempScores[id] = maxVal; },
+                changeDirectScore(delta) { let newVal = (Number(this.directScore) || 0) + delta; if (newVal < 0) newVal = 0; if (newVal > 100) newVal = 100; this.directScore = newVal; },
+                validateDirectScore() { let val = Number(this.directScore) || 0; if (val < 0) this.directScore = 0; if (val > 100) this.directScore = 100; },
+                getRoundTotal(c, r) { if (!c) return 0; const s = r == 1 ? c.r1Scores : (r == 2 ? c.r2Scores : c.r3Scores); if (!s || typeof s !== 'object') return 0; var scoresList = []; for (var k in s) { var val = Number(s[k]); if (!isNaN(val) && val > 0) { scoresList.push(val); } } if (scoresList.length === 0) return 0; if (scoresList.length >= 5) { scoresList.sort((a, b) => a - b); scoresList.pop(); scoresList.shift(); } var total = scoresList.reduce((acc, curr) => acc + curr, 0); return Math.round(total * 100) / 100; },
+                getGrandTotal(c) { return Number(this.getRoundTotal(c, 1)) + Number(this.getRoundTotal(c, 2)); },
+                getDisplayScore(c) { if (this.system.currentRound == 3) return this.getRoundTotal(c, 3); if (this.system.currentRound == 2) return this.getGrandTotal(c); return this.getRoundTotal(c, 1); },
+                getR3JudgeCount(c) { if (!c || !c.r3Scores) return 0; return Object.keys(c.r3Scores).length; },
+                
+                downloadPDF() {
+                    this.loading = true;
+                    
+                    let judgeHeaders = this.system.judges.map(j => '<th style="padding: 12px 4px; border: 1px solid #cbd5e1; text-align: center; background-color: #f8fafc; color: #1e293b; font-size: 14px; font-weight: bold;">' + j.name + '</th>').join('');
+                    
+                    let htmlContent = '<div style="padding: 40px; font-family: \'Helvetica Neue\', Helvetica, Arial, sans-serif; color: #0f172a; background: white;">' +
+                        '<div style="text-align: center; margin-bottom: 30px; border-bottom: 3px solid #eab308; padding-bottom: 20px;">' +
+                            '<h1 style="font-size: 48px; font-weight: 900; margin: 0 0 10px 0; color: #b45309; letter-spacing: 4px; text-transform: uppercase;">' + (this.system.eventName || 'STONELAND 歌唱大赛') + '</h1>' +
+                            '<h2 style="font-size: 26px; color: #475569; margin: 0; font-weight: 600; letter-spacing: 2px;">🏆 官方成绩明细单 - 截至第 ' + this.system.currentRound + ' 回合</h2>' +
+                        '</div>' +
+                        
+                        '<table style="width: 100%; border-collapse: collapse; border: 2px solid #94a3b8; font-size: 14px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">' +
+                            '<thead>' +
+                                '<tr style="background-color: #f1f5f9; border-bottom: 2px solid #94a3b8;">' +
+                                    '<th style="padding: 14px 8px; border: 1px solid #cbd5e1; text-align: center; width: 60px; font-size: 15px; color: #1e293b;">排名</th>' +
+                                    '<th style="padding: 14px 8px; border: 1px solid #cbd5e1; text-align: left; font-size: 15px; color: #1e293b;">选手姓名</th>' +
+                                    judgeHeaders +
+                                    (this.system.currentRound > 1 ? '<th style="padding: 14px 8px; border: 1px solid #cbd5e1; text-align: center; font-size: 15px; color: #1e293b;">前段累计</th>' : '') +
+                                    '<th style="padding: 14px 8px; border: 1px solid #cbd5e1; text-align: center; font-size: 18px; color: #b45309; font-weight: 900;">最终赛果</th>' +
+                                '</tr>' +
+                            '</thead>' +
+                            '<tbody>' +
+                                this.sortedContestants.map((c, index) => {
+                                    let judgeScores = this.system.judges.map(j => {
+                                        let r1 = Number(c.r1Scores[j.id]) || 0;
+                                        let r2 = Number(c.r2Scores[j.id]) || 0;
+                                        let r3 = Number(c.r3Scores[j.id]) || 0;
+                                        
+                                        let text = [];
+                                        if (this.system.currentRound >= 1) text.push('<span style="color:#64748b; font-size:11px;">R1:</span> <span style="font-weight:bold; font-size:15px;">' + (r1>0?r1:'-') + '</span>');
+                                        if (this.system.currentRound >= 2) text.push('<span style="color:#64748b; font-size:11px;">R2:</span> <span style="font-weight:bold; font-size:15px;">' + (r2>0?r2:'-') + '</span>');
+                                        if (this.system.currentRound >= 3) text.push('<span style="color:#64748b; font-size:11px;">R3:</span> <span style="font-weight:bold; font-size:15px; color:#b45309;">' + (r3>0?r3:'-') + '</span>');
+                                        
+                                        return '<td style="padding: 10px 8px; border: 1px solid #cbd5e1; text-align: center; line-height: 1.6;">' + text.join('<br>') + '</td>';
+                                    }).join('');
+                                    
+                                    let totalScoreDisplay = this.system.currentRound == 3 ? this.getRoundTotal(c, 3) : this.getGrandTotal(c);
+                                    
+                                    let accumulateHTML = '';
+                                    if (this.system.currentRound > 1) {
+                                        let accumulateScore = this.system.currentRound == 3 ? (this.getRoundTotal(c, 1) + this.getRoundTotal(c, 2)) : (this.system.currentRound == 2 ? this.getRoundTotal(c, 1) : '-');
+                                        accumulateHTML = '<td style="padding: 14px 8px; border: 1px solid #cbd5e1; text-align: center; font-family: monospace; font-size: 16px; color: #475569; font-weight: bold;">' + accumulateScore + '</td>';
+                                    }
+                                    
+                                    return '<tr style="border-bottom: 1px solid #e2e8f0; background-color: ' + (index % 2 === 0 ? '#ffffff' : '#f8fafc') + ';">' +
+                                        '<td style="padding: 14px 8px; border: 1px solid #cbd5e1; text-align: center; font-weight: 900; font-size: 18px; color: #0f172a;">' + (index + 1) + '</td>' +
+                                        '<td style="padding: 14px 8px; border: 1px solid #cbd5e1; font-weight: bold; font-size: 16px; color: #0f172a;">' +
+                                            '<span style="background-color: #fef08a; padding: 2px 6px; border-radius: 4px; font-size: 12px; margin-right: 6px; color: #854d0e;">No.' + c.no + '</span>' +
+                                            c.name +
+                                        '</td>' +
+                                        judgeScores + accumulateHTML +
+                                        '<td style="padding: 14px 8px; border: 1px solid #cbd5e1; text-align: center; font-weight: 900; font-size: 24px; color: #d97706; font-family: monospace; background-color: #fffbeb;">' + totalScoreDisplay + '</td>' +
+                                    '</tr>';
+                                }).join('') +
+                            '</tbody>' +
+                        '</table>' +
+                        
+                        '<div style="margin-top: 50px; border-top: 2px dashed #cbd5e1; padding-top: 20px; display: flex; justify-content: space-between; align-items: center;">' +
+                            '<div style="color: #64748b; font-size: 12px; font-weight: bold;">由 STONELAND SAAS PRO SYSTEM 高级赛事引擎生成</div>' +
+                            '<div style="color: #0f172a; font-size: 14px; font-weight: bold; background: #f1f5f9; padding: 6px 12px; border-radius: 6px;">打印时间: ' + new Date().toLocaleString('zh-CN') + '</div>' +
+                        '</div>' +
+                    '</div>';
+                    
+                    const el = document.createElement('div'); el.innerHTML = htmlContent;
+                    html2pdf().from(el).set({ 
+                        margin: [10, 10, 10, 10], 
+                        filename: (this.system.eventName || '赛事成绩明细') + '.pdf', 
+                        image: { type: 'jpeg', quality: 1 }, 
+                        html2canvas: { scale: 2, useCORS: true }, 
+                        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' } 
+                    }).save().then(() => { this.loading = false; });
+                },
+                copyBoardLink() { navigator.clipboard.writeText(this.boardLink); this.copyBtnText = '✅ 已复制'; setTimeout(() => this.copyBtnText = '📋 复制', 2000); }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
