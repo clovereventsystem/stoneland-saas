@@ -296,7 +296,6 @@
                                 <img v-if="c.photo" :src="c.photo" class="w-12 h-12 rounded-full object-cover mr-3">
                                 <div>
                                     <div class="font-bold text-lg">{{ c.name }}</div>
-                                    <!-- 🌟 修复点1：动态显示当前回合的歌曲名字 -->
                                     <div class="text-xs text-yellow-400/90 mt-0.5 font-bold">
                                         🎵 曲目: {{ system.currentRound == 3 ? (c.song3 || '未填R3曲目') : (system.currentRound == 2 ? (c.song2 || '未填R2曲目') : (c.song1 || '未填R1曲目')) }}
                                     </div>
@@ -503,9 +502,45 @@
                 compressImg(file, cb) { if(!file) return; const reader = new FileReader(); reader.onload = (e) => { const img = new Image(); img.src = e.target.result; img.onload = () => { const canvas = document.createElement('canvas'); canvas.width = 120; canvas.height = 120; canvas.getContext('2d').drawImage(img, 0, 0, 120, 120); cb(canvas.toDataURL('image/jpeg', 0.6)); } }; reader.readAsDataURL(file); },
                 handleContestantPhoto(e) { this.compressImg(e.target.files[0], d => this.newC.photo = d); }, handleJudgePhoto(e) { this.compressImg(e.target.files[0], d => this.newJ.photo = d); }, handleEditContestantPhoto(e) { this.compressImg(e.target.files[0], d => this.editingC.photo = d); }, handleEditJudgePhoto(e) { this.compressImg(e.target.files[0], d => this.editingJ.photo = d); },
                 openWheelModal() { this.showWheelModal = true; this.selectedWheelContestant = null; this.$nextTick(() => { this.drawWheel(); }); },
-                drawWheel() { const canvas = this.$refs.wheelCanvas; if (!canvas) return; const ctx = canvas.getContext('2d'); const contestants = [...this.system.contestants].sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0)); const len = contestants.length; if (len === 0) return; ctx.clearRect(0, 0, 300, 300); const center = 150; const radius = 145; const sliceAngle = (2 * Math.PI) / len; const colors = ['#eab308', '#ca8a04', '#d97706', '#b45309', '#78350f', '#f59e0b', '#facc15', '#ea580c']; for (let i = 0; i < len; i++) { const angle = i * sliceAngle; ctx.beginPath(); ctx.fillStyle = colors[i % colors.length]; ctx.moveTo(center, center); ctx.arc(center, center, radius, angle, angle + sliceAngle); ctx.closePath(); ctx.fill(); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 2; ctx.stroke(); ctx.save(); ctx.translate(center, center); ctx.rotate(angle + sliceAngle / 2); ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffffff'; ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4; ctx.font = `bold ${len > 10 ? 12 : 15}px sans-serif`; let text = contestants[i].name; if (text.length > 5) text = text.substring(0, 5) + '..'; ctx.fillText(text, radius - 20, 0); ctx.restore(); } },
                 
-                // 🌟 修复点2：精准计算旋转角度，确保转盘停下的名字和弹出的名字完全一致
+                // 🌟 核心修正：旋转文字绘制，确保扇形文字与Canvas物理布局 100% 正向对齐
+                drawWheel() { 
+                    const canvas = this.$refs.wheelCanvas; if (!canvas) return; 
+                    const ctx = canvas.getContext('2d'); 
+                    const contestants = [...this.system.contestants].sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0)); 
+                    const len = contestants.length; if (len === 0) return; 
+                    ctx.clearRect(0, 0, 300, 300); 
+                    const center = 150; const radius = 145; const sliceAngle = (2 * Math.PI) / len; 
+                    const colors = ['#eab308', '#ca8a04', '#d97706', '#b45309', '#78350f', '#f59e0b', '#facc15', '#ea580c']; 
+                    for (let i = 0; i < len; i++) { 
+                        const angle = i * sliceAngle; 
+                        ctx.beginPath(); 
+                        ctx.fillStyle = colors[i % colors.length]; 
+                        ctx.moveTo(center, center); 
+                        ctx.arc(center, center, radius, angle, angle + sliceAngle); 
+                        ctx.closePath(); 
+                        ctx.fill(); 
+                        ctx.strokeStyle = '#0f172a'; 
+                        ctx.lineWidth = 2; 
+                        ctx.stroke(); 
+                        
+                        ctx.save(); 
+                        ctx.translate(center, center); 
+                        ctx.rotate(angle + sliceAngle / 2); 
+                        ctx.textAlign = 'right'; 
+                        ctx.textBaseline = 'middle'; 
+                        ctx.fillStyle = '#ffffff'; 
+                        ctx.shadowColor = 'rgba(0,0,0,0.8)'; 
+                        ctx.shadowBlur = 4; 
+                        ctx.font = `bold ${len > 10 ? 12 : 15}px sans-serif`; 
+                        let text = contestants[i].name; 
+                        if (text.length > 5) text = text.substring(0, 5) + '..'; 
+                        ctx.fillText(text, radius - 20, 0); 
+                        ctx.restore(); 
+                    } 
+                },
+                
+                // 🌟 核心修正：让指针停下的扇形区与弹出的名字绝对吻合
                 spinWheel() { 
                     if (this.isSpinning) return; 
                     const contestants = [...this.system.contestants].sort((a, b) => (Number(a.no) || 0) - (Number(b.no) || 0)); 
@@ -517,8 +552,8 @@
                     const randIndex = Math.floor(Math.random() * len); 
                     const sliceAngle = 360 / len; 
                     
-                    // 核心修正公式：让指针精准指向对应的扇形区域
-                    const targetAngle = 360 * 8 + (360 - (randIndex * sliceAngle + sliceAngle / 2));
+                    // 修正后的精准对齐计算公式
+                    const targetAngle = 360 * 8 + (360 - (randIndex * sliceAngle)) - (sliceAngle / 2);
                     this.wheelRotation = targetAngle;
 
                     let clickInterval = 60; let elapsed = 0; 
